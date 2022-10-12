@@ -122,8 +122,8 @@ class QTable():
         return -1, list(finalState)
 
     def nextStateReward2(self, state, state2, currA, currA2):
-        if state in self.terminationStates:
-            return 20, state
+        if (state or state2) in self.terminationStates:
+            return 20
 
         self.nextAction(currA)
 
@@ -138,14 +138,30 @@ class QTable():
         else:
             currAction = self.actionS
         finalState = np.array(state) + np.array(currAction)
+
+        self.nextAction(currA2)
+
+        if self.actionNext == "l":
+            currAction = self.actionL
+        elif self.actionNext == "r":
+            currAction = self.actionR
+        elif self.actionNext == "u":
+            currAction = self.actionU
+        elif self.actionNext == "d":
+            currAction = self.actionD
+        else:
+            currAction = self.actionS
+        finalState2 = np.array(state2) + np.array(currAction)
+        
         # if robot crosses wall
         if (-1 in list(finalState)) or (self.gridc == finalState[1]) or (self.gridr == finalState[0]):
             finalState = state
+        if (-1 in list(finalState2)) or (self.gridc == finalState2[1]) or (self.gridr == finalState2[0]):
+            finalState2 = state2
 
-        if list(finalState) in self.terminationStates:
-            return 20, list(finalState)
-
-        return -1, list(finalState)
+        if list(finalState) or list(finalState2) in self.terminationStates:
+            return 20
+        return -1
 
     def updateQ(self):
         for it in tqdm(range(self.n_episodes)):
@@ -227,8 +243,19 @@ class QTable():
             # print(i)
             self.episodeLenght[it] = i
     
+    def goalCheck2(self, finalState, goal):
+        if finalState == goal:
+            return True
+        else:
+            return False
+
+    # Each agent has a Q table
+    # No collisions
+    # They share rewards. 
+    # If a target is reached, the other agent looks for another target.
     def updateQ3(self):
         for it in tqdm(range(self.n_episodes)):
+            # initialize goal
             self.initalState()
             state = self.initState
             state2 = self.initState2
@@ -236,43 +263,44 @@ class QTable():
 
             # assign random goals
             self.terminalGoal()
-            # while True:
-            for i in range(100):
-                
+            a, _ = self.max_dict(self.Q[(state[0], state[1])])
+            reward, finalState = self.nextStateReward(state, a)
+            a2, _ = self.max_dict(self.Q2[(state2[0], state2[1])])
+            reward2, finalState2 = self.nextStateReward(state2, a2)
+
+            while True:
                 # both agents reached terminal states
                 if self.goalCheck(state2, state):
-                    print("Terminal Goals Reached.")
                     break
                 else:
                     # we reached the end
                     finalState = state
-                    if finalState in self.terminationStates:
-                        # print("Terminal Goal Reached.")
-                        break
+                    if finalState not in self.terminationStates:   
+                        a, _ = self.max_dict(self.Q[(state[0], state[1])])
+                        reward, finalState = self.nextStateReward(state, a)
+                        self.agentReward[it] += reward 
+                        # modify Q function
+                        old_qsa = self.Q[(state[0], state[1])][a]
+                        _, max_q_s2a2 = self.max_dict(self.Q[(finalState[0], finalState[1])])
+                        self.Q[(state[0], state[1])][a] = old_qsa + self.lr*(reward2+reward + self.gamma*max_q_s2a2 - old_qsa)
+                        self.deltas[(state[0], state[1])][a][it] = np.abs(old_qsa - self.Q[(state[0], state[1])][a])
+                        # pdb.set_trace()
+                        state = finalState
 
-                    a, _ = self.max_dict(self.Q[(state[0], state[1])])
-                    reward, finalState = self.nextStateReward(state, a)
-                    self.agentReward[it] += reward 
-                    # modify Q function
-                    old_qsa = self.Q[(state[0], state[1])][a]
-                    _, max_q_s2a2 = self.max_dict(self.Q[(finalState[0], finalState[1])])
-                    self.Q[(state[0], state[1])][a] = old_qsa + self.lr*(reward + self.gamma*max_q_s2a2 - old_qsa)
-                    self.deltas[(state[0], state[1])][a][it] = np.abs(old_qsa - self.Q[(state[0], state[1])][a])
-                    # pdb.set_trace()
-                    state = finalState
-
-                    a2, _ = self.max_dict(self.Q2[(state2[0], state2[1])])
-                    reward2, finalState2 = self.nextStateReward(state2, a2)
-                    self.agentReward2[it] += reward2 
-                    # modify Q function
-                    old_qsa2 = self.Q2[(state2[0], state2[1])][a2]
-                    _, max_q_s2a2 = self.max_dict(self.Q2[(finalState2[0], finalState2[1])])
-                    self.Q2[(state2[0], state2[1])][a2] = old_qsa2 + self.lr2*(reward2 + self.gamma2*max_q_s2a2 - old_qsa2)
-                    self.deltas2[(state2[0], state2[1])][a2][it] = np.abs(old_qsa2 - self.Q2[(state2[0], state2[1])][a2])
-                    # pdb.set_trace()
-                    state2 = finalState2
+                    finalState2 = state2
+                    if finalState2 not in self.terminationStates: 
+                        a2, _ = self.max_dict(self.Q2[(state2[0], state2[1])])
+                        reward2, finalState2 = self.nextStateReward(state2, a2)
+                        self.agentReward2[it] += reward2 
+                        # modify Q function
+                        old_qsa2 = self.Q2[(state2[0], state2[1])][a2]
+                        _, max_q_s2a2 = self.max_dict(self.Q2[(finalState2[0], finalState2[1])])
+                        self.Q2[(state2[0], state2[1])][a2] = old_qsa2 + self.lr2*(reward+reward2 + self.gamma2*max_q_s2a2 - old_qsa2)
+                        self.deltas2[(state2[0], state2[1])][a2][it] = np.abs(old_qsa2 - self.Q2[(state2[0], state2[1])][a2])
+                        # pdb.set_trace()
+                        state2 = finalState2
    
-                # i = i + 1
+                i = i + 1
 
             # print(i)
             self.episodeLenght[it] = i
